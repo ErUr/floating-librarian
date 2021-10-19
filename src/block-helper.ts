@@ -387,7 +387,7 @@ module.exports = {
                         "emoji": true
                     },
                     "value": collectionItem.isbn + "|" + collectionItem.title + "|" + "true", //user owns it
-                    "action_id": "collection_item_other_ratings"
+                    "action_id": "collection_item_find_other_ratings"
                 }
             )
         }
