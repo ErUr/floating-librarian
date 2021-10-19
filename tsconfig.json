@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+      "module": "CommonJS",
+      "noImplicitAny": true,
+      "strict": true,
+      "sourceMap": true,
+      "moduleResolution": "node",
+      "outDir": "dist",
+      "rootDir": "src",
+      "strictNullChecks": true,
+      "typeRoots": [
+          "./src/types",
+          "./node_modules/@types"
+        ]
+    },
+    "include": ["src/**/*"]
+  }
