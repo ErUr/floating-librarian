@@ -259,7 +259,7 @@ module.exports = {
                         },
                         {
                             "type": "mrkdwn",
-                            "text": "*Ratings*"
+                            "text": "*Rating*"
                         }, ...ratingFields
                     ]
                 }]
