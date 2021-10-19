@@ -402,7 +402,7 @@ module.exports = {
                     "type": "mrkdwn",
                     "text": `*${collectionItem.title}*  \n *Author:* ${collectionItem.authorName} \n *ISBN:* ${collectionItem.isbn}` +
                         (collectionItem.collectionInfo.ownerCount > 0 ? "\n Owners in your team: " + collectionItem.collectionInfo.ownerCount : "") +
-                        (collectionItem.collectionInfo.avgRating !== 0 ? " \n Average rating in your team: " + "⭐".repeat(Math.round(collectionItem.collectionInfo.avgRating)) : "") +
+                        (Math.round(collectionItem.collectionInfo.avgRating) !== 0 ? " \n Average rating in your team: " + "⭐".repeat(Math.round(collectionItem.collectionInfo.avgRating)) : "") +
                         (collectionItem.collectionInfo.lenderCount > 0 ? "\n Potential lenders in your team: " + collectionItem.collectionInfo.lenderCount : "")
                 },
                 "accessory": {
