@@ -4,6 +4,7 @@
  * TODO: replace before scaling this application
  */
 const https = require('https');
+var Sentry = require("@sentry/node");
 
 type ApiBookResult = {
     title: string,
@@ -42,6 +43,14 @@ module.exports = {
      * @returns: Book[] - Items representing books
      */
     searchBooks: async function (searchString: string): Promise<Book[]> {
+        const transaction = Sentry.getCurrentHub().getScope().getTransaction();
+        let span: any = null
+        if (transaction) {
+            span = transaction.startChild({
+              op: "Outgoing request",
+              description: "Search books",
+            });
+          }
         return new Promise((resolve: any) => {
             const limit = 20 //fetch up to 20 books to be sliced further down later, after filters were applied
             const fields = "title,author_name,cover_i,isbn"
@@ -52,6 +61,7 @@ module.exports = {
                 res.on('end', () => {
                     const apiResult = JSON.parse(data)
                     const books = buildSearchResultBookList(apiResult)
+                    span?.finish();
                     resolve(books)
                 })
             }).on("error", (err: any) => {

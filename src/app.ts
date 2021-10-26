@@ -6,6 +6,8 @@ const { App } = require('@slack/bolt');
 const blockHelper = require('./block-helper');
 const openlibrary = require('./openlibrary-api');
 const database = require('./postgres-repo');
+var Sentry = require("@sentry/node");
+var Tracing = require("@sentry/tracing");
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -15,6 +17,36 @@ const app = new App({
 });
 
 database.setup()
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  integrations: [
+    new Sentry.Integrations.Http({ tracing: true }),
+  ],
+  tracesSampleRate: 1.0,
+});
+
+
+// Tracing/timing middleware to have proper transactions and spans in sentry
+async function timeWithSentry({ payload, client, context, next }: any) {
+  const transaction = Sentry.startTransaction({
+    op: "Incoming request",
+    name: payload.action_id ?? payload.type,
+  });
+  Sentry.configureScope((scope: any) => {
+    scope.setSpan(transaction);
+  });
+
+  try {
+    await next();
+  } catch (err: any) {
+    Sentry.captureException(err)
+  }
+  transaction?.finish()
+}
+
+app.use(timeWithSentry)
+
 
 /**
  * Creates the default home view

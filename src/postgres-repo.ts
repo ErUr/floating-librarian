@@ -1,4 +1,6 @@
 const { Pool } = require('pg');
+var Sentry = require("@sentry/node");
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL + "?sslmode=no-verify"
 })
@@ -25,6 +27,18 @@ type CollectionDBItem = {
     owner_count: number,
     lender_count: number,
     avg_rating: number,
+}
+
+function setupSpan(spanName: string): any {
+    const transaction = Sentry.getCurrentHub().getScope().getTransaction();
+    let span: any = null
+    if (transaction) {
+        span = transaction.startChild({
+            op: "Database",
+            description: spanName,
+        });
+    }
+    return span
 }
 
 /**
@@ -63,6 +77,8 @@ module.exports = {
      * @returns: Promise<CollectionItem[]> - Items from the users collection - max. 30
      */
     getBookCollection: async function (teamId: string, memberId: string): Promise<CollectionItem[]> {
+        const span = setupSpan("Get book collection")
+
         return new Promise((resolve: any, reject: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
@@ -108,6 +124,7 @@ module.exports = {
                             }
                         }
                     })
+                    span?.finish()
                     resolve(collectionItems)
                 })
             })
@@ -123,6 +140,8 @@ module.exports = {
      * @returns: Promise<UserRating[]> - Ratings of other users - max. 30
      */
     getUserRatings: async function (teamId: string, memberId: string, isbn: string): Promise<UserRating[]> {
+        const span = setupSpan("Get user ratings")
+
         return new Promise((resolve: any, reject: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
@@ -135,6 +154,7 @@ module.exports = {
                             rating: dbItem.rating!
                         }
                     })
+                    span?.finish()
                     resolve(userRatings)
                 })
             })
@@ -150,6 +170,8 @@ module.exports = {
      * @returns: Promise<string[]> - List of Slack memberIds of potential lenders
      */
     getPotentialLenders: async function (teamId: string, memberId: string, isbn: string): Promise<string[]> {
+        const span = setupSpan("Get potential lenders")
+
         return new Promise((resolve: any, reject: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
@@ -157,6 +179,7 @@ module.exports = {
                     done()
                     if (err) throw err
                     const users = res.rows.map((dbItem: Partial<CollectionDBItem>): string => dbItem.member_id!)
+                    span?.finish()
                     resolve(users)
                 })
             })
@@ -170,6 +193,8 @@ module.exports = {
      * @returns: Promise<CollectionInfo[]> - List of items containing meta info like avg rating and number of owners for a specific book each
      */
     getCollectionInfoForBooks: async function (teamId: string, isbns: string[]): Promise<CollectionInfo[]> {
+        const span = setupSpan("Get collection info")
+
         return new Promise((resolve: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
@@ -196,6 +221,7 @@ module.exports = {
                                 avgRating: dbResult.avg_rating || 0
                             })
                         });
+                        span?.finish()
                         resolve(result)
                     })
             })
@@ -214,12 +240,15 @@ module.exports = {
      * @returns Promise<void> - nothing or an error
      */
     addBook: async function (teamId: string, memberId: string, isbn: string, title: string, authorName: string, coverId: string | null): Promise<void> {
+        const span = setupSpan("Add book")
+
         return new Promise((resolve: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
                 client.query(`INSERT INTO ${dbName} (${columns.teamId}, ${columns.memberId}, ${columns.isbn}, ${columns.title}, ${columns.authorName}, ${columns.coverId}, ${columns.rating}, ${columns.lendOut}) VALUES ($1, $2, $3, $4, $5, $6, 0, false);`, [teamId, memberId, isbn, title, authorName, coverId], (err: Error) => {
                     done()
                     if (err) throw err
+                    span?.finish()
                     resolve()
                 })
             })
@@ -234,12 +263,15 @@ module.exports = {
      * @returns Promise<void> - nothing or an error
      */
     removeBook: async function (teamId: string, memberId: string, isbn: string): Promise<void> {
+        const span = setupSpan("Remove book")
+
         return new Promise((resolve: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
                 client.query(`DELETE FROM ${dbName} WHERE ${columns.teamId} = $1 AND ${columns.memberId} = $2 AND ${columns.isbn} = $3;`, [teamId, memberId, isbn], (err: Error) => {
                     done()
                     if (err) throw err
+                    span?.finish()
                     resolve()
                 })
             })
@@ -255,12 +287,15 @@ module.exports = {
      * @returns Promise<void> - nothing or an error 
      */
     updateLendOut: async function (teamId: string, memberId: string, isbn: string, lendOut: boolean): Promise<void> {
+        const span = setupSpan("Update lendOut")
+
         return new Promise((resolve: any, reject: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
                 client.query(`UPDATE ${dbName} SET ${columns.lendOut} = $1 WHERE ${columns.teamId} = $2 AND ${columns.memberId} = $3 AND ${columns.isbn} = $4;`, [lendOut, teamId, memberId, isbn], (err: Error) => {
                     done()
                     if (err) throw err
+                    span?.finish()
                     resolve()
                 })
             })
@@ -276,12 +311,15 @@ module.exports = {
      * @returns Promise<void> - nothing or an error 
      */
     updateRating: async function (teamId: string, memberId: string, isbn: string, rating: number): Promise<void> {
+        const span = setupSpan("Update rating")
+
         return new Promise((resolve: any, reject: any) => {
             pool.connect((err: Error, client: any, done: any) => {
                 if (err) throw err
                 client.query(`UPDATE ${dbName} SET ${columns.rating} = $1 WHERE ${columns.teamId} = $2 AND ${columns.memberId} = $3 AND ${columns.isbn} = $4;`, [rating, teamId, memberId, isbn], (err: Error) => {
                     done()
                     if (err) throw err
+                    span?.finish()
                     resolve()
                 })
             })
