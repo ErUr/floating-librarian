@@ -10,6 +10,7 @@ type CollectionItem = {
     coverId: string | null             //cover ID to be used to retrieve images from the OpenLibrary covers API https://openlibrary.org/dev/docs/api/covers
     rating: number                     //star rating from 1 to 5, 0 signifying "No rating"
     lendOut: boolean                   //Indicates whether the user would lend out the book
+    totalCount: number                 //Total amount of books in the collection of the owner of this book - TODO: improve design, reduce redundancy by pulling it out into a containing structure
     collectionInfo: ItemCollectionInfo // metadata
 }
 

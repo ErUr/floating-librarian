@@ -27,6 +27,7 @@ type CollectionDBItem = {
     owner_count: number,
     lender_count: number,
     avg_rating: number,
+    total_count: number | undefined
 }
 
 function setupSpan(spanName: string): any {
@@ -74,10 +75,16 @@ module.exports = {
      * Limited to 30 results
      * @param teamId: string - teamId of the Slack team
      * @param memberId: string - memberId of the Slack user
+     * @param limit: number, default 0 - limit to use for pagination, 0 gets mapped to NO LIMIT
+     * @param offset: number, default 0 - offset to use with pagination
      * @returns: Promise<CollectionItem[]> - Items from the users collection - max. 30
      */
-    getBookCollection: async function (teamId: string, memberId: string): Promise<CollectionItem[]> {
+    getBookCollection: async function (teamId: string, memberId: string, limit: number = 0, offset: number = 0): Promise<CollectionItem[]> {
         const span = setupSpan("Get book collection")
+        let params: any[] = [teamId, memberId, offset]
+        if (limit !== 0) {
+            params.push(limit)
+        }
 
         return new Promise((resolve: any, reject: any) => {
             pool.connect((err: Error, client: any, done: any) => {
@@ -96,15 +103,15 @@ module.exports = {
                         GROUP BY ${columns.isbn}
                 ) a 
                 INNER JOIN (
-                    SELECT * 
+                    SELECT *, count(*) OVER() as total_count
                     FROM ${dbName} 
                     WHERE 
                         ${columns.teamId} = $1 AND 
                         ${columns.memberId} = $2
                 ) b
                 ON a.${columns.isbn} = b.${columns.isbn}
-                ORDER BY id DESC LIMIT 30;
-                `, [teamId, memberId], (err: Error, res: any) => {
+                ORDER BY id DESC ${limit !== 0 ? "LIMIT $4" : ""} OFFSET $3;
+                `, params, (err: Error, res: any) => {
                     done()
                     if (err) throw err
                     const collectionItems = res.rows.map((dbItem: CollectionDBItem): CollectionItem => {
@@ -117,6 +124,7 @@ module.exports = {
                             coverId: dbItem.cover_id,
                             rating: dbItem.rating,
                             lendOut: dbItem.lend_out,
+                            totalCount: dbItem.total_count!,
                             collectionInfo: {
                                 ownerCount: dbItem.owner_count,
                                 lenderCount: dbItem.lender_count,
@@ -224,6 +232,35 @@ module.exports = {
                         span?.finish()
                         resolve(result)
                     })
+            })
+        })
+    },
+
+    /**
+     * Retrieves the size of a users collection
+     * @param teamId: string - Slack teamId of the user
+     * @param memberId: string - Slack memberId of the user
+     * @returns Promise<number> - number of books in the users collection
+     */
+    getCollectionSize: async function (teamId: string, memberId: string): Promise<number> {
+        const span = setupSpan("Get book collection size")
+
+        return new Promise((resolve: any, reject: any) => {
+            pool.connect((err: Error, client: any, done: any) => {
+                if (err) throw err
+                client.query(`
+                    SELECT count(*) as total_count 
+                    FROM ${dbName} 
+                    WHERE 
+                        ${columns.teamId} = $1 AND 
+                        ${columns.memberId} = $2;`, 
+                    [teamId, memberId], (err: Error, res: any) => {
+                        done()
+                        if (err) throw err
+                        const result = parseInt(res.rows[0]?.total_count)
+                        span?.finish()
+                        resolve(result)
+                })
             })
         })
     },

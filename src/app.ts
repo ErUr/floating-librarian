@@ -3,7 +3,7 @@
  * TODOs: see GitHub
  */
 const { App } = require('@slack/bolt');
-const blockHelper = require('./block-helper');
+const blockHelper = require('./block-helper/block-helper');
 const openlibrary = require('./openlibrary-api');
 const database = require('./postgres-repo');
 var Sentry = require("@sentry/node");
@@ -15,6 +15,9 @@ const app = new App({
   socketMode: true,
   appToken: process.env.SLACK_APP_TOKEN
 });
+
+const HOME_BOOKS_PER_PAGE = 10
+const PEEK_OTHERER_USERS_COLLECTION_LIMIT = 30
 
 database.setup()
 
@@ -31,7 +34,7 @@ Sentry.init({
 async function timeWithSentry({ payload, client, context, next }: any) {
   const transaction = Sentry.startTransaction({
     op: "Incoming request",
-    name: payload.action_id ?? payload.type,
+    name: payload.action_id?.split("+")[0] ?? payload.type,
   });
   Sentry.configureScope((scope: any) => {
     scope.setSpan(transaction);
@@ -47,6 +50,9 @@ async function timeWithSentry({ payload, client, context, next }: any) {
 
 app.use(timeWithSentry)
 
+function calculateTotalPages(itemCount: number): number {
+  return Math.ceil(itemCount / HOME_BOOKS_PER_PAGE)
+}
 
 /**
  * Creates the default home view
@@ -54,12 +60,17 @@ app.use(timeWithSentry)
  * @param memberId Slack memberId of the calling user
  * @returns Block Kit blocks for the default Home View
  */
-async function createHomeView(teamId: string, memberId: string) {
-  let collectionItems: CollectionItem[] = await database.getBookCollection(teamId, memberId)
+async function createHomeView(teamId: string, memberId: string, pageNumber: number) {
+  let collectionItems: CollectionItem[] = await database.getBookCollection(teamId, memberId, HOME_BOOKS_PER_PAGE, HOME_BOOKS_PER_PAGE * (pageNumber-1))
 
-  const headerBlocks = blockHelper.createHomeViewHeaderBlocks(memberId, collectionItems.length >= 30)
-  const collectionItemBlocks = collectionItems.map((collectionItem: CollectionItem) => blockHelper.createCollectionBookSpecificBlocks(collectionItem, true)).flat()
-  return [...headerBlocks, ...collectionItemBlocks]
+  const headerBlocks = blockHelper.createHomeViewHeaderBlocks(memberId)
+  const collectionItemBlocks = collectionItems.map((collectionItem: CollectionItem) => blockHelper.createCollectionBookSpecificBlocks(collectionItem, true, pageNumber)).flat()
+  const totalPages = calculateTotalPages(collectionItems[0]?.totalCount)
+  if(totalPages == 1) {
+    return [...headerBlocks, ...collectionItemBlocks]
+  }
+  const pageSelectorBlocks = blockHelper.createPageSelectorBlocks(pageNumber, totalPages)
+  return [...headerBlocks, ...pageSelectorBlocks, ...collectionItemBlocks]
 }
 
 /**
@@ -71,7 +82,7 @@ app.event('app_home_opened', async ({event, client, body}: any) => {
       user_id: event.user,
       view: {
         "type": "home",
-        "blocks": await createHomeView(body.team_id, event.user)
+        "blocks": await createHomeView(body.team_id, event.user, 1)
       }
     });
   }
@@ -134,7 +145,7 @@ app.action('collection_add_item', async ({ body, ack, client, payload }: any) =>
     hash: body.view.hash,
     view: {
       "type": "home",
-      "blocks": await createHomeView(body.user.team_id, body.user.id)
+      "blocks": await createHomeView(body.user.team_id, body.user.id, 1)
     }
   });
 });
@@ -144,13 +155,19 @@ app.action('collection_add_item', async ({ body, ack, client, payload }: any) =>
  */
 app.action('collection_remove_item', async ({ body, ack, client, payload }: any) => {
   await ack();
-  await database.removeBook(body.user.team_id, body.user.id, payload.value)
+  let [isbn, pageNumber] = payload.value.split("|", 2)
+  const collectionSize = await database.getCollectionSize(body.user.team_id, body.user.id)
+  const totalPagesAfterDeletion = calculateTotalPages(collectionSize - 1)
+  if(pageNumber > totalPagesAfterDeletion) {
+    pageNumber--
+  }
+  await database.removeBook(body.user.team_id, body.user.id, isbn)
   await client.views.update({
     view_id: body.view.id,
     hash: body.view.hash,
     view: {
       "type": "home",
-      "blocks": await createHomeView(body.user.team_id, body.user.id)
+      "blocks": await createHomeView(body.user.team_id, body.user.id, pageNumber)
     }
   });
 });
@@ -160,14 +177,14 @@ app.action('collection_remove_item', async ({ body, ack, client, payload }: any)
  */
 app.action('collection_item_update_rating', async ({ body, ack, client, payload }: any) => {
   await ack();
-  let [isbn, rating] = payload.selected_option.value.split("|", 2)
+  let [isbn, rating, pageNumber] = payload.selected_option.value.split("|", 3)
   await database.updateRating(body.user.team_id, body.user.id, isbn, parseInt(rating))
   await client.views.update({
     view_id: body.view.id,
     hash: body.view.hash,
     view: {
       "type": "home",
-      "blocks": await createHomeView(body.user.team_id, body.user.id)
+      "blocks": await createHomeView(body.user.team_id, body.user.id, pageNumber)
     }
   });
 });
@@ -177,14 +194,14 @@ app.action('collection_item_update_rating', async ({ body, ack, client, payload 
  */
 app.action('collection_item_update_lend_out', async ({ body, ack, client, payload }: any) => {
   await ack();
-  let [isbn, lendOut] = payload.selected_option.value.split("|", 2)
+  let [isbn, lendOut, pageNumber] = payload.selected_option.value.split("|", 3)
   await database.updateLendOut(body.user.team_id, body.user.id, isbn, lendOut === "true")
   await client.views.update({
     view_id: body.view.id,
     hash: body.view.hash,
     view: {
       "type": "home",
-      "blocks": await createHomeView(body.user.team_id, body.user.id)
+      "blocks": await createHomeView(body.user.team_id, body.user.id, pageNumber)
     }
   });
 });
@@ -193,13 +210,14 @@ app.action('collection_item_update_lend_out', async ({ body, ack, client, payloa
  * Invoked when a user clicks on the "close" button on the search result page (could potentially be redirected to the normal app's home)
  */
 app.action("show_home", async ({ body, ack, client, payload }: any) => {
+  const selectedPage = parseInt(payload.selected_option?.value ?? 1)
   await ack();
   await client.views.update({
     view_id: body.view.id,
     hash: body.view.hash,
     view: {
       "type": "home",
-      "blocks": await createHomeView(body.user.team_id, body.user.id)
+      "blocks": await createHomeView(body.user.team_id, body.user.id, selectedPage)
     }
   });
 });
@@ -265,7 +283,7 @@ app.action("collection_item_find_other_ratings", async ({ body, ack, client, pay
  */
 app.action("other_users_collection", async ({ body, ack, client, payload }: any) => {
   await ack();
-  const collectionItems = await database.getBookCollection(body.user.team_id, payload.selected_user)
+  const collectionItems = await database.getBookCollection(body.user.team_id, payload.selected_user, PEEK_OTHERER_USERS_COLLECTION_LIMIT) //limiting the view of other users collection to 30 books for now
   let collectionItemBlocks = []
   if(collectionItems.length > 0){
     collectionItemBlocks = [
@@ -276,7 +294,7 @@ app.action("other_users_collection", async ({ body, ack, client, payload }: any)
             "text": `Have a look at <@${payload.selected_user}>'s collection`
         }
       },
-      ...collectionItems.map((collectionItem: CollectionItem) => blockHelper.createCollectionBookSpecificBlocks(collectionItem, false)).flat()
+      ...collectionItems.map((collectionItem: CollectionItem) => blockHelper.createCollectionBookSpecificBlocks(collectionItem, false, 1)).flat() //pageNumber set to 1 for now - todo: update with paging for modal
     ]
   }else{
     collectionItemBlocks = [
